@@ -1,0 +1,2 @@
+# dengue_epidemic
+In this repo I present my analysis of data on a past dengue outbreak in a Mexican city. My goal is to determine which variables were related to disease occurence. The data set consists of records on 196 people from two sectors of the city, and the variables include the person's identification number, age, socioeconomic status, the city sector, savings account status, and disease status.
