@@ -1,0 +1,138 @@
+---
+title: "Disease Outbreak Analysis"
+author: "Anne (Annie) Lott"
+date: "April 12, 2019"
+output: github_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+To control an epidemic, it is important to determine what variables are related to disease occurrence. In this project I evaluate data on a dengue epidemic in a Mexican city to identify factors that increased or decreased the odds of contracting the disease. I apply logistic regression to all independent variables (excluding identification number) to predict disease status. I also implement the Naive Bayes method to detect which variables may be associated with dengue incidence.
+```{r, warning = FALSE, message = FALSE}
+#set working directory where data is located
+#read in data
+dengue = read.table(file = "disease_outbreak.txt", sep = "",
+                    header = FALSE)
+
+#create column names
+colnames(dengue) = c("id", "age", "socioeconomic_status",
+                     "sector", "disease_status", 
+                     "savings_account_status")
+
+#recode sector as a 0 if in sector 1, 1 if in sector 2
+dengue$sector = ifelse(dengue$sector == 1, 0, 1)
+
+#set socioeconomic_status, sector, disease_status
+#and savings_account_status as factors
+dengue$socioeconomic_status = as.factor(dengue$socioeconomic_status)
+dengue$sector = as.factor(dengue$sector)
+dengue$disease_status = as.factor(dengue$disease_status)
+dengue$savings_account_status = as.factor(dengue$savings_account_status)
+
+#randomly partition data into a training and validation set
+#set seed first
+set.seed(123)
+train.rows = sample(rownames(dengue), floor(nrow(dengue)*0.7))
+train.data = dengue[as.numeric(train.rows),]
+valid.data = dengue[-as.numeric(train.rows),]
+
+#apply logistic regression to all predictors but id
+logit.reg = glm(disease_status ~ . -id, 
+                data = train.data, 
+                family = "binomial")
+summary(logit.reg)
+round(data.frame(summary(logit.reg)$coefficients, 
+                 odds = exp(coef(logit.reg))), 5)
+```
+
+At an alpha of 0.1, the variables of age and sector of city are significantly related to disease occurrence. Controlling for all other variables, a one year increase in age increased the odds of contracting dengue by around 3%. In addition, a person living in sector 2 had an estimated 3.3 times higher odds of contracting dengue than a person living in sector 1, with all other variables held constant. These results indicate that the disease incidence depended on geography, and that increased age may have made people more susceptible to contracting dengue. 
+
+```{r, message = FALSE, warning = FALSE}
+#use step to select variables
+step.fwd = step(logit.reg, direction = "forward")
+step.bwd = step(logit.reg, direction = "backward")
+step.both = step(logit.reg, direction = "both")
+
+#compare the results of the different variable selection procedures
+summary(step.fwd)
+summary(step.bwd)
+summary(step.both)
+```
+
+Backward variable selection and both-way stepwise variable selection both outputted the same model, including only age and sector of the city as variables. Forward variable selection included all variables within the model, but had a higher AIC score than the model chosen by backward and both-way stepwise regression. Moving forward, I only consider age and sector in my model, while also investigating a potential interaction effect between age and sector. An interaction effect would mean that the odds of contracting dengue with increasing age would vary by sector. 
+
+```{r, message = FALSE, warning = FALSE}
+#fit model with age, sector, and interaction effect of age and sector
+logit.reg2 = glm(disease_status ~ age + sector + age*sector, 
+                 data = train.data, family = "binomial")
+
+#look at interaction effect plot
+library(sjPlot)
+library(sjmisc)
+library(ggplot2)
+plot_model(logit.reg2, type = "pred", terms = c("age", "sector"))
+```
+
+There seems to be no evidence of an interaction effect between age and sector based on the plot of the predicted probabilites of disease occurrence versus age based on sector, as the lines in the plot are parallel.
+
+```{r, message = FALSE, warning = FALSE}
+#use variable selection to determine if interaction effect
+#should be included
+step.fwd2 = step(logit.reg2, direction = "forward",
+                 scope = list(upper = ~ 0 +age + sector + age*sector,
+                              lower = ~ 0 + age+ sector))
+step.bwd2 = step(logit.reg2, direction = "backward",
+                 scope = list(upper = ~ 0 +age + sector + age*sector,
+                              lower = ~ 0 + age+ sector))
+step.both2 = step(logit.reg2, direction = "both",
+                 scope = list(upper = ~ 0 +age + sector + age*sector,
+                              lower = ~ 0 + age+ sector))
+
+#compare the results of the variable selection procedures
+summary(step.fwd2)
+summary(step.bwd2)
+summary(step.both2)
+```
+
+The variable selection methods that excluded the interaction term resulted in models with lower AICs, so I will drop the interaction between age and sector in my final model.
+
+```{r, message = FALSE, warning = FALSE}
+#build the final logistic regression model on the training data
+logit.final = glm(disease_status~ age + sector, data = train.data,
+                  family = "binomial")
+
+#predict the probabilities of disease incidence
+probs = predict(logit.final, valid.data)
+
+#if probability of disease exceeds 0.5, classify as diseased,
+#otherwise classify as not diseased
+preds = ifelse(probs > 0.5, 1, 0)
+
+#create a confusion matrix of the results
+library(caret)
+confusionMatrix(as.factor(preds), valid.data$disease_status, positive = "1")
+```
+
+My final model has a very low sensitivity, meaning it can't correctly classify people who had the disease. This model is most likely weak because strong variables that are associated with disease occurrence, such as use of mosquito nets, are not included in the data.
+
+I will now implement the Naive Bayes procedure on the training data while excluding the age and id variables, as Naive Bayes only works for categorical variables.
+
+```{r, message = FALSE, warning = FALSE}
+library(e1071)
+
+#run Naive Bayes
+nb.model = naiveBayes(disease_status ~ .-id -age, data = train.data)
+
+#predict the class
+preds.nb = predict(nb.model, newdata = valid.data)
+
+#create a confusion matrix of the results
+confusionMatrix(as.factor(preds.nb), valid.data$disease_status, 
+                positive = "1")
+
+```
+
+The sensitivity of the Naive Bayes model is also quite low. Therefore, although I can conclude that age and sector are related to dengue incidence, there is little predictive power in models including these variables, because their association with the occurrence of dengue is somewhat weak. 
